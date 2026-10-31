@@ -1,0 +1,699 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#0b0f14">
+<title>Canh bé ngủ – báo giật mình</title>
+<style>
+  :root { --bg:#0b0f14; --card:#151c25; --text:#e8edf2; --muted:#8a97a6; --accent:#4da3ff; --ok:#3ecf8e; --warn:#ffb020; --bad:#ff4d4f; }
+  * { box-sizing:border-box; }
+  html,body { margin:0; background:var(--bg); color:var(--text); font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif; }
+  body { padding:12px; padding-bottom:40px; max-width:720px; margin:0 auto; }
+  h1 { font-size:18px; margin:4px 0 10px; }
+  h3 { font-size:15px; margin:18px 0 8px; }
+  #stage { position:relative; width:100%; background:#000; border-radius:12px; overflow:hidden; min-height:120px; }
+  #video { display:block; width:100%; height:auto; }
+  #overlay { position:absolute; inset:0; width:100%; height:100%; touch-action:none; }
+  #stageMsg { position:absolute; inset:0; display:flex; align-items:center; justify-content:center; color:var(--muted); text-align:center; padding:20px; font-size:14px; }
+  .row { display:flex; gap:8px; flex-wrap:wrap; margin-top:10px; }
+  button { font:inherit; font-size:15px; border:0; border-radius:10px; padding:12px 14px; background:var(--card); color:var(--text); flex:1 1 auto; min-height:46px; }
+  button.primary { background:var(--accent); color:#001; font-weight:600; }
+  button.danger { background:var(--bad); color:#fff; font-weight:600; }
+  button:disabled { opacity:.45; }
+  .status { display:flex; gap:8px; flex-wrap:wrap; margin-top:10px; font-size:14px; }
+  .pill { background:var(--card); border-radius:999px; padding:6px 12px; }
+  .pill.ok { color:var(--ok); } .pill.warn { color:var(--warn); } .pill.bad { color:var(--bad); }
+  #graph { width:100%; height:80px; background:var(--card); border-radius:10px; margin-top:10px; display:block; }
+  .card { background:var(--card); border-radius:12px; padding:12px; margin-top:10px; font-size:14px; line-height:1.45; }
+  .banner { border-radius:10px; padding:10px 12px; margin-top:8px; font-size:14px; }
+  .banner.warn { background:#3a2a05; color:#ffd27a; } .banner.bad { background:#3d0d0e; color:#ffb3b4; } .banner.info { background:#0d2440; color:#a9d0ff; }
+  label { display:block; margin:10px 0 4px; }
+  input[type=range] { width:100%; }
+  .muted { color:var(--muted); font-size:13px; }
+  details summary { cursor:pointer; font-weight:600; }
+  #log .item { display:flex; align-items:center; gap:8px; background:var(--card); border-radius:10px; padding:8px; margin-bottom:6px; }
+  #log .item img { width:72px; height:54px; object-fit:cover; border-radius:6px; background:#000; }
+  #log .meta { flex:1; font-size:13px; }
+  #log .meta b { font-size:14px; }
+  #log .item button { flex:0 0 auto; padding:8px 10px; min-height:36px; font-size:13px; }
+  .tag-startle { color:var(--bad); } .tag-long { color:var(--warn); } .tag-sys { color:var(--accent); }
+  .modal { position:fixed; inset:0; z-index:50; display:flex; flex-direction:column; align-items:center; justify-content:center; padding:16px; text-align:center; }
+  .hidden { display:none !important; }
+  #alarm { background:#b00012; animation:flash 0.8s infinite; z-index:100; }
+  @keyframes flash { 50% { background:#ff2030; } }
+  #alarm h2 { font-size:28px; margin:8px 0; }
+  #alarm canvas, #viewer canvas { max-width:100%; max-height:45vh; border-radius:10px; background:#000; margin:10px 0; }
+  #alarm button { background:#fff; color:#b00012; font-size:20px; font-weight:700; width:100%; max-width:420px; min-height:64px; flex:0 0 auto; }
+  #viewer { background:rgba(0,0,0,.92); }
+  #viewer .row { width:100%; max-width:420px; }
+  #dim { background:#000; z-index:40; color:#222; font-size:13px; }
+</style>
+</head>
+<body>
+<h1>👶 Canh bé ngủ – báo khi giật mình, chới với</h1>
+
+<div id="stage">
+  <video id="video" playsinline muted autoplay></video>
+  <canvas id="overlay"></canvas>
+  <div id="stageMsg"><span>Bấm <b>Bắt đầu theo dõi</b> và cho phép dùng camera.<br><small>Phải mở trang này trong Safari/Chrome qua link https:// – trong khung xem trước của app chat camera bị chặn.</small></span></div>
+</div>
+
+<div class="status">
+  <span class="pill" id="pState">Chưa chạy</span>
+  <span class="pill" id="pCount">Giật mình 30 phút qua: 0</span>
+  <span class="pill" id="pMotion">Cử động: –</span>
+  <span class="pill" id="pBaby">Nhận diện bé: –</span>
+</div>
+<canvas id="graph"></canvas>
+<div class="muted">Đường xanh: mức cử động <b>trên người bé</b>. Đường đỏ: ngưỡng. Vạch đỏ: lần giật mình. Khung xanh lá trên hình = vùng bé app đang theo dõi; chấm vàng = cổ tay.</div>
+
+<div id="banners"></div>
+
+<div class="row">
+  <button class="primary" id="btnStart">▶ Bắt đầu theo dõi</button>
+  <button id="btnStop" disabled>■ Dừng</button>
+</div>
+<div class="row">
+  <button id="btnRoi" disabled>✏️ Khoanh vùng bé</button>
+  <button id="btnRoiReset" disabled>Xóa khung</button>
+  <button id="btnDim" disabled>🌙 Tối màn hình</button>
+</div>
+<div class="row">
+  <button id="btnTest">🔔 Thử chuông</button>
+</div>
+
+<details class="card" id="settings">
+  <summary>⚙️ Cài đặt</summary>
+  <label>Độ nhạy: <b id="sensVal">6</b>/10</label>
+  <input type="range" id="sens" min="1" max="10" step="1" value="6">
+  <div class="muted">Cao = báo cả cử động nhỏ (dễ báo nhầm hơn). Nên để cao, báo nhầm còn hơn bỏ sót.</div>
+  <label>Cử động ngắn hơn bao lâu thì tính là “giật mình”: <b id="durVal">1.5</b> giây</label>
+  <input type="range" id="maxDur" min="0.8" max="3" step="0.1" value="1.5">
+  <label><input type="checkbox" id="alarmAllFast"> Báo cả cử động nhanh mà tay không chới với (giật đầu, chân…)</label>
+  <label><input type="checkbox" id="alarmLong"> Báo chuông cả khi bé cử động kéo dài (trở mình, thức dậy, quấy)</label>
+  <label><input type="checkbox" id="alarmRepeat" checked> Chuông kêu liên tục đến khi tôi bấm tắt</label>
+  <label>Camera</label>
+  <div class="row" style="margin-top:0">
+    <button id="btnCam">🔄 Đổi camera trước/sau</button>
+  </div>
+</details>
+
+<details class="card">
+  <summary>📋 Cách đặt máy (đọc trước khi ngủ)</summary>
+  <ol style="padding-left:18px;margin:8px 0">
+    <li>Kê điện thoại <b>cố định</b> (giá đỡ, kẹp), nhìn thấy <b>toàn thân bé, cả hai tay</b>. Máy rung/xê dịch sẽ báo nhầm.</li>
+    <li>Để <b>đèn ngủ mờ</b>. Tối hẳn thì camera không thấy gì – app sẽ cảnh báo “quá tối”.</li>
+    <li><b>Cắm sạc</b>, <b>âm lượng tối đa</b>, tắt chế độ im lặng / Không làm phiền. Đặt máy gần chỗ bạn nằm để nghe rõ.</li>
+    <li>Tắt tự khóa màn hình (iPhone: Cài đặt › Màn hình & Độ sáng › Tự động khóa › Không bao giờ; Android: Cài đặt › Màn hình › Thời gian chờ). <b>Không chuyển sang app khác</b> – rời trang này là ngừng theo dõi.</li>
+    <li>App tự tìm bé (khung xanh lá) và chỉ xét cử động trên người bé. Đồ vật, quạt, rèm ở ngoài khung bị bỏ qua. Lần đầu cần tải mô hình nhận diện (~10MB, nên dùng Wi‑Fi).</li>
+    <li>Nếu app không tìm thấy bé (tối, chăn che kín), bấm <b>Khoanh vùng bé</b> và kéo một khung sát quanh bé: app sẽ dùng khung này thay thế. Tránh để người lớn nằm trong khung.</li>
+    <li>Bấm <b>Thử chuông</b> để chắc là nghe thấy. Xem biểu đồ vài phút khi bé ngủ yên: đường xanh phải nằm dưới đường đỏ.</li>
+  </ol>
+  <div class="muted">Mỗi lần báo, app lưu lại ~5 giây hình quanh thời điểm đó. Bấm “Lưu video” để có clip đưa bác sĩ xem. Nhật ký mất khi tải lại trang.</div>
+</details>
+
+<div class="card muted">⚠️ Đây là công cụ hỗ trợ tự làm, không phải thiết bị y tế. Có thể bỏ sót (bé bị chăn che, máy bị xê dịch, quá tối, điện thoại tắt màn hình) và có thể báo nhầm. Không thay được người lớn trông bé, không phát hiện sốt, nôn, thở nhanh, li bì… Nếu lo lắng, cứ đưa bé đi khám.</div>
+
+<h3>Nhật ký</h3>
+<div id="log"><div class="muted">Chưa có sự kiện.</div></div>
+<div class="row"><button id="btnClear">Xóa nhật ký</button></div>
+
+<!-- Alarm -->
+<div id="alarm" class="modal hidden">
+  <div style="font-size:48px">🚨</div>
+  <h2 id="alarmTitle">BÉ CÓ CỬ ĐỘNG GIẬT MÌNH</h2>
+  <div id="alarmSub"></div>
+  <canvas id="alarmCanvas" width="320" height="240"></canvas>
+  <button id="btnAck">Tôi đã dậy – Tắt chuông</button>
+</div>
+
+<!-- Viewer -->
+<div id="viewer" class="modal hidden">
+  <div id="viewerTitle"></div>
+  <canvas id="viewerCanvas" width="320" height="240"></canvas>
+  <div class="row">
+    <button id="btnSave">💾 Lưu video</button>
+    <button id="btnCloseViewer">Đóng</button>
+  </div>
+  <div class="muted" id="saveMsg"></div>
+</div>
+
+<div id="dim" class="modal hidden">Đang theo dõi • chạm để mở</div>
+
+<script>
+(() => {
+'use strict';
+const $ = id => document.getElementById(id);
+const video = $('video'), overlay = $('overlay'), octx = overlay.getContext('2d');
+const graph = $('graph'), gctx = graph.getContext('2d');
+
+// ---------- Settings ----------
+const settings = { sens:6, maxDur:1.5, alarmLong:false, alarmAllFast:false, alarmRepeat:true, facing:'environment', roi:{x:0,y:0,w:1,h:1} };
+try { Object.assign(settings, JSON.parse(localStorage.getItem('canhbe-settings')||'{}')); } catch(e) {}
+function saveSettings(){ try { localStorage.setItem('canhbe-settings', JSON.stringify(settings)); } catch(e) {} }
+$('sens').value = settings.sens; $('sensVal').textContent = settings.sens;
+$('maxDur').value = settings.maxDur; $('durVal').textContent = settings.maxDur;
+$('alarmLong').checked = settings.alarmLong; $('alarmAllFast').checked = settings.alarmAllFast; $('alarmRepeat').checked = settings.alarmRepeat;
+$('sens').oninput = e => { settings.sens = +e.target.value; $('sensVal').textContent = settings.sens; saveSettings(); };
+$('maxDur').oninput = e => { settings.maxDur = +e.target.value; $('durVal').textContent = settings.maxDur.toFixed(1); saveSettings(); };
+$('alarmLong').onchange = e => { settings.alarmLong = e.target.checked; saveSettings(); };
+$('alarmAllFast').onchange = e => { settings.alarmAllFast = e.target.checked; saveSettings(); };
+$('alarmRepeat').onchange = e => { settings.alarmRepeat = e.target.checked; saveSettings(); };
+
+// ---------- Siren (generated WAV, played via <audio> so it also works on iPhone in silent mode) ----------
+function makeSirenURL(){
+  const sr = 22050, secs = 2, n = sr*secs;
+  const buf = new ArrayBuffer(44 + n*2), v = new DataView(buf);
+  const wstr = (o,s) => { for (let i=0;i<s.length;i++) v.setUint8(o+i, s.charCodeAt(i)); };
+  wstr(0,'RIFF'); v.setUint32(4,36+n*2,true); wstr(8,'WAVE'); wstr(12,'fmt ');
+  v.setUint32(16,16,true); v.setUint16(20,1,true); v.setUint16(22,1,true);
+  v.setUint32(24,sr,true); v.setUint32(28,sr*2,true); v.setUint16(32,2,true); v.setUint16(34,16,true);
+  wstr(36,'data'); v.setUint32(40,n*2,true);
+  let ph = 0;
+  for (let i=0;i<n;i++){
+    const t = i/sr, p = (t % 1);              // 1 s up/down sweep
+    const tri = p < .5 ? p*2 : 2 - p*2;
+    const f = 650 + 900*tri;
+    ph += 2*Math.PI*f/sr;
+    let s = Math.sin(ph); s = Math.sign(s)*0.55 + s*0.35;
+    v.setInt16(44+i*2, Math.max(-1,Math.min(1,s))*32000, true);
+  }
+  return URL.createObjectURL(new Blob([buf], {type:'audio/wav'}));
+}
+const siren = new Audio(makeSirenURL());
+siren.loop = true; siren.preload = 'auto';
+let audioUnlocked = false;
+function unlockAudio(){
+  try { if (navigator.audioSession) navigator.audioSession.type = 'playback'; } catch(e) {}
+  if (audioUnlocked) return;
+  siren.volume = 0.01;
+  const p = siren.play();
+  if (p && p.then) p.then(() => { siren.pause(); siren.currentTime = 0; siren.volume = 1; audioUnlocked = true; }).catch(() => { siren.volume = 1; });
+  else { siren.pause(); siren.volume = 1; audioUnlocked = true; }
+}
+function sirenOn(){ siren.volume = 1; siren.loop = settings.alarmRepeat; siren.currentTime = 0; const p = siren.play(); if (p && p.catch) p.catch(()=>{}); }
+function sirenOff(){ siren.pause(); siren.currentTime = 0; }
+
+// ---------- State ----------
+let stream = null, running = false, timer = null, watchdog = null;
+let PW = 160, PH = 120, SW = 320, SH = 240;
+const work = document.createElement('canvas'), wctx = work.getContext('2d', {willReadFrequently:true});
+const snap = document.createElement('canvas'), sctx = snap.getContext('2d');
+let cur, prev, hasPrev = false;
+let noise = 3, T = 14, tickN = 0, lastFrame = 0, warmUntil = 0, suppressUntil = 0;
+let hist = [];          // {t, m, thr}
+let ring = [];          // recent frames {t, wall, url}
+let ev = null;          // current motion event
+let events = [];        // log records
+let pending = [];       // records still collecting post-event frames
+let marks = [];         // times of startle for graph
+let alarmActive = false, alarmRec = null, wakeLock = null, hiddenAt = null;
+let startedWall = null, dark = false, darkSince = 0;
+let selecting = false, selStart = null, selRect = null;
+
+// ---------- Baby (pose) detection ----------
+const MP_VER = '0.10.14';
+const MP_BASE = 'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@' + MP_VER;
+const MP_MODEL = 'https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_lite/float16/1/pose_landmarker_lite.task';
+let pose = null, poseState = 'off', poseErr = 0, lastPoseTs = 0, poseLoading = null;
+let babyBox = null, babyLastSeen = 0, lastLm = null, lastLmT = 0, everSeen = false;
+let poseHist = [];   // {t, ok, lw, rw, scale}
+let aspect = 4/3;
+async function loadPose(){
+  if (pose || poseLoading) return poseLoading;
+  poseState = 'loading'; updateBaby();
+  banner('pose', '⏳ Đang tải mô hình nhận diện bé (lần đầu ~10MB)…', 'info');
+  poseLoading = (async () => {
+    try {
+      const mp = await import(MP_BASE + '/vision_bundle.mjs');
+      const fs = await mp.FilesetResolver.forVisionTasks(MP_BASE + '/wasm');
+      const opts = d => ({ baseOptions:{ modelAssetPath:MP_MODEL, delegate:d }, runningMode:'VIDEO', numPoses:1,
+        minPoseDetectionConfidence:0.3, minPosePresenceConfidence:0.3, minTrackingConfidence:0.3 });
+      try { pose = await mp.PoseLandmarker.createFromOptions(fs, opts('GPU')); }
+      catch(e){ pose = await mp.PoseLandmarker.createFromOptions(fs, opts('CPU')); }
+      poseState = 'ready'; banner('pose', null);
+    } catch(e){
+      pose = null; poseState = 'failed';
+      banner('pose', '⚠️ Không tải được mô hình nhận diện bé (' + (e.message||e) + '). App đang dùng <b>vùng khoanh tay</b>: hãy bấm “Khoanh vùng bé” và khoanh sát quanh bé.', 'warn');
+    }
+    poseLoading = null; updateBaby();
+  })();
+  return poseLoading;
+}
+const vis = p => p && (p.visibility === undefined || p.visibility > 0.35);
+const dist = (a,b) => Math.hypot((a.x-b.x)*aspect, a.y-b.y);
+function runPose(now){
+  const ts = Math.max(lastPoseTs + 1, Math.round(now)); lastPoseTs = ts;
+  let res;
+  try { res = pose.detectForVideo(video, ts); poseErr = 0; }
+  catch(e){ if (++poseErr > 30){ pose = null; poseState = 'failed'; updateBaby();
+    banner('pose', '⚠️ Nhận diện bé bị lỗi, app chuyển sang dùng vùng khoanh tay.', 'warn'); } return; }
+  const lm = res && res.landmarks && res.landmarks[0];
+  const pts = lm ? lm.filter(vis) : [];
+  if (!lm || pts.length < 5){ poseHist.push({ t:now, ok:false }); trimPose(now); return; }
+  let x0=1,y0=1,x1=0,y1=0; for (const p of pts){ x0=Math.min(x0,p.x); y0=Math.min(y0,p.y); x1=Math.max(x1,p.x); y1=Math.max(y1,p.y); }
+  const bw = Math.max(x1-x0, 0.12), bh = Math.max(y1-y0, 0.12);
+  const nb = { x:Math.max(0,x0-bw*0.25), y:Math.max(0,y0-bh*0.2) };
+  nb.w = Math.min(1, x1+bw*0.25) - nb.x; nb.h = Math.min(1, y1+bh*0.2) - nb.y;
+  if (!babyBox){ babyBox = nb; resetDetector(1500); }
+  else { const a = 0.35; for (const k of ['x','y','w','h']) babyBox[k] = babyBox[k]*(1-a) + nb[k]*a; }
+  babyLastSeen = now; everSeen = true;
+  const sh = (vis(lm[11]) && vis(lm[12])) ? dist(lm[11], lm[12]) : 0;
+  const scale = Math.max(sh, (bw*aspect + bh)*0.18, 0.03);
+  poseHist.push({ t:now, ok:true, lw: vis(lm[15]) ? {x:lm[15].x, y:lm[15].y} : null, rw: vis(lm[16]) ? {x:lm[16].x, y:lm[16].y} : null, scale });
+  trimPose(now);
+  lastLm = lm; lastLmT = now;
+}
+function trimPose(now){ while (poseHist.length && poseHist[0].t < now - 8000) poseHist.shift(); }
+// Region where motion counts: detected baby box (∩ user ROI), else user ROI if drawn, else null.
+function userRoiSet(){ const r = settings.roi; return !(r.x===0 && r.y===0 && r.w===1 && r.h===1); }
+function getRegion(){
+  const r = settings.roi;
+  if (poseState === 'failed' || poseState === 'off') return r;
+  if (babyBox){
+    const x0 = Math.max(r.x, babyBox.x), y0 = Math.max(r.y, babyBox.y);
+    const x1 = Math.min(r.x+r.w, babyBox.x+babyBox.w), y1 = Math.min(r.y+r.h, babyBox.y+babyBox.h);
+    if (x1-x0 > 0.03 && y1-y0 > 0.03) return { x:x0, y:y0, w:x1-x0, h:y1-y0 };
+    return null;
+  }
+  return userRoiSet() ? r : null;
+}
+// Did the wrists fling during the event?
+function armAnalysis(e, now){
+  const pre = poseHist.filter(s => s.ok && s.t < e.start && s.t > e.start - 2000);
+  const dur = poseHist.filter(s => s.ok && s.t >= e.start - 50 && s.t <= now);
+  if (!pre.length || !dur.length) return { known:false };
+  const p = pre[pre.length-1];
+  const disp = k => { if (!p[k]) return null; let m = null; for (const s of dur){ if (s[k]){ const d = dist(s[k], p[k]) / p.scale; m = m === null ? d : Math.max(m, d); } } return m; };
+  const L = disp('lw'), R = disp('rw');
+  if (L === null && R === null) return { known:false };
+  const thr = 0.5 * Math.pow(0.9, settings.sens - 1);
+  const n = (L !== null && L > thr ? 1 : 0) + (R !== null && R > thr ? 1 : 0);
+  return { known:true, L, R, n };
+}
+function updateBaby(){
+  const el = $('pBaby'); if (!el) return;
+  const now = performance.now();
+  let t, c = '';
+  if (poseState === 'loading'){ t = 'Nhận diện bé: đang tải…'; }
+  else if (poseState === 'failed' || poseState === 'off'){ t = userRoiSet() ? 'Dùng vùng khoanh tay' : 'Chưa khoanh vùng!'; c = userRoiSet() ? 'warn' : 'bad'; }
+  else if (babyBox && now - babyLastSeen < 3000){ t = 'Đang thấy bé ✓'; c = 'ok'; }
+  else if (babyBox){ t = 'Không rõ bé – giữ vùng cũ'; c = 'warn'; }
+  else if (userRoiSet()){ t = 'Chưa thấy bé – dùng vùng khoanh'; c = 'warn'; }
+  else { t = 'Chưa thấy bé'; c = 'bad'; }
+  el.textContent = t; el.className = 'pill ' + c;
+  if (running && poseState === 'ready' && !babyBox && !userRoiSet() && startedWall && Date.now() - startedWall > 20000)
+    banner('nobaby', '👀 <b>Chưa nhận diện được bé</b> nên app chưa theo dõi. Chỉnh camera thấy rõ người bé, bật đèn ngủ, hoặc bấm “Khoanh vùng bé” để khoanh tay.', 'bad');
+  else banner('nobaby', null);
+}
+
+function fmtTime(ms){ const d = new Date(ms); return d.toLocaleTimeString('vi-VN', {hour:'2-digit', minute:'2-digit', second:'2-digit'}); }
+
+// ---------- Banners ----------
+const bannerMap = {};
+function banner(key, text, kind){
+  if (!text){ if (bannerMap[key]) { bannerMap[key].remove(); delete bannerMap[key]; } return; }
+  let el = bannerMap[key];
+  if (!el){ el = document.createElement('div'); bannerMap[key] = el; $('banners').appendChild(el); }
+  el.className = 'banner ' + (kind||'info'); el.innerHTML = text;
+}
+
+// ---------- Camera ----------
+async function startCamera(){
+  if (!window.isSecureContext || !navigator.mediaDevices || !navigator.mediaDevices.getUserMedia){
+    throw new Error('Trình duyệt không cho dùng camera ở trang này. Trang cần mở qua địa chỉ https:// (xem hướng dẫn mở app).');
+  }
+  if (stream) stream.getTracks().forEach(t => t.stop());
+  stream = await navigator.mediaDevices.getUserMedia({ audio:false, video:{ facingMode:{ideal:settings.facing}, width:{ideal:640}, height:{ideal:480} } });
+  video.srcObject = stream;
+  await video.play();
+  await new Promise(r => { if (video.videoWidth) r(); else video.onloadedmetadata = () => r(); });
+  const vw = video.videoWidth, vh = video.videoHeight;
+  aspect = vw/vh;
+  PW = 160; PH = Math.max(60, Math.round(160*vh/vw));
+  SW = 320; SH = Math.round(320*vh/vw);
+  work.width = PW*2; work.height = PH*2; snap.width = SW; snap.height = SH;
+  cur = new Int16Array(PW*PH); prev = new Int16Array(PW*PH); hasPrev = false;
+  $('stageMsg').classList.add('hidden');
+  stream.getVideoTracks()[0].addEventListener('ended', () => { if (running) triggerAlarm('sys', 'MẤT TÍN HIỆU CAMERA', 'Camera đã bị tắt. Theo dõi đang dừng!'); });
+  sizeOverlay();
+}
+function sizeOverlay(){
+  const r = overlay.getBoundingClientRect(), dpr = window.devicePixelRatio||1;
+  overlay.width = Math.round(r.width*dpr); overlay.height = Math.round(r.height*dpr);
+  drawOverlay();
+}
+window.addEventListener('resize', () => { sizeOverlay(); sizeGraph(); });
+
+// ---------- Overlay / ROI ----------
+function drawOverlay(flash){
+  const w = overlay.width, h = overlay.height;
+  octx.clearRect(0,0,w,h);
+  const r = selRect || settings.roi;
+  if (!(r.x===0 && r.y===0 && r.w===1 && r.h===1) || selRect){
+    octx.fillStyle = 'rgba(0,0,0,.45)';
+    octx.beginPath(); octx.rect(0,0,w,h); octx.rect(r.x*w, r.y*h, r.w*w, r.h*h); octx.fill('evenodd');
+    octx.strokeStyle = selRect ? '#ffd27a' : '#4da3ff'; octx.lineWidth = 3*(window.devicePixelRatio||1);
+    octx.strokeRect(r.x*w, r.y*h, r.w*w, r.h*h);
+  }
+  const dpr = window.devicePixelRatio||1;
+  if (babyBox && poseState === 'ready'){
+    const fresh = performance.now() - babyLastSeen < 3000;
+    octx.strokeStyle = fresh ? '#3ecf8e' : 'rgba(62,207,142,.45)'; octx.lineWidth = 3*dpr; octx.setLineDash(fresh ? [] : [8*dpr, 6*dpr]);
+    octx.strokeRect(babyBox.x*w, babyBox.y*h, babyBox.w*w, babyBox.h*h); octx.setLineDash([]);
+  }
+  if (lastLm && performance.now() - lastLmT < 1000){
+    for (const i of [11,12,13,14,15,16]){ const p = lastLm[i]; if (!vis(p)) continue;
+      octx.fillStyle = (i===15||i===16) ? '#ffd27a' : 'rgba(255,255,255,.7)';
+      octx.beginPath(); octx.arc(p.x*w, p.y*h, ((i===15||i===16) ? 6 : 4)*dpr, 0, 7); octx.fill(); }
+  }
+  if (flash){ octx.strokeStyle = '#ff4d4f'; octx.lineWidth = 10; octx.strokeRect(0,0,w,h); }
+}
+function normPt(e){ const r = overlay.getBoundingClientRect(); return { x:Math.min(1,Math.max(0,(e.clientX-r.left)/r.width)), y:Math.min(1,Math.max(0,(e.clientY-r.top)/r.height)) }; }
+overlay.addEventListener('pointerdown', e => { if (!selecting) return; selStart = normPt(e); overlay.setPointerCapture(e.pointerId); e.preventDefault(); });
+overlay.addEventListener('pointermove', e => { if (!selecting || !selStart) return; const p = normPt(e);
+  selRect = { x:Math.min(p.x,selStart.x), y:Math.min(p.y,selStart.y), w:Math.abs(p.x-selStart.x), h:Math.abs(p.y-selStart.y) }; drawOverlay(); });
+overlay.addEventListener('pointerup', () => { if (!selecting) return;
+  if (selRect && selRect.w > 0.08 && selRect.h > 0.08){ settings.roi = selRect; saveSettings(); }
+  selRect = null; selStart = null; selecting = false; banner('roi', null);
+  $('btnRoi').textContent = '✏️ Khoanh vùng bé'; drawOverlay(); resetDetector(); });
+$('btnRoi').onclick = () => { selecting = !selecting; selRect = null;
+  $('btnRoi').textContent = selecting ? 'Đang khoanh… (kéo trên hình)' : '✏️ Khoanh vùng bé';
+  banner('roi', selecting ? 'Dùng ngón tay kéo một khung bao quanh bé trên hình camera.' : null, 'info'); };
+$('btnRoiReset').onclick = () => { settings.roi = {x:0,y:0,w:1,h:1}; saveSettings(); babyBox = null; drawOverlay(); resetDetector(); updateBaby(); };
+
+function resetDetector(ms){ hist = []; ev = null; hasPrev = false; warmUntil = performance.now() + (ms || 3000); }
+
+// ---------- Detection ----------
+function percentile(arr, p){ if (!arr.length) return 0; const a = arr.slice().sort((x,y)=>x-y); return a[Math.min(a.length-1, Math.floor(p*a.length))]; }
+
+function tick(){
+  if (!running || video.readyState < 2) return;
+  const now = performance.now();
+  lastFrame = now; tickN++;
+  const W2 = work.width, H2 = work.height;
+  wctx.drawImage(video, 0, 0, W2, H2);
+  const d = wctx.getImageData(0, 0, W2, H2).data;
+  for (let y=0; y<PH; y++){
+    const r0 = (2*y)*W2*4, r1 = (2*y+1)*W2*4;
+    for (let x=0; x<PW; x++){
+      const a = r0 + 8*x, b = r1 + 8*x;
+      const s = ((d[a]*77+d[a+1]*150+d[a+2]*29) + (d[a+4]*77+d[a+5]*150+d[a+6]*29)
+               + (d[b]*77+d[b+1]*150+d[b+2]*29) + (d[b+4]*77+d[b+5]*150+d[b+6]*29)) >> 10;
+      cur[y*PW+x] = s;
+    }
+  }
+  // keep frames for replay (≈7.5 fps)
+  if (tickN % 2 === 0){
+    sctx.drawImage(video, 0, 0, SW, SH);
+    const fr = { t:now, wall:Date.now(), url:snap.toDataURL('image/jpeg', 0.55) };
+    ring.push(fr);
+    while (ring.length && ring[0].t < now - 4000) ring.shift();
+    for (const rec of pending){ rec.frames.push(fr); }
+    for (let i = pending.length-1; i >= 0; i--){ if (now >= pending[i].until){ pending[i].done = true; pending.splice(i,1); renderLog(); } }
+  }
+  if (pose && tickN % 2 === 1){ runPose(now); drawOverlay(alarmActive); }
+  if (!hasPrev){ prev.set(cur); hasPrev = true; return; }
+
+  const roi = getRegion();
+  if (!roi){ const tmp0 = prev; prev = cur; cur = tmp0; ev = null; hist = []; $('pMotion').textContent = 'Cử động: –'; drawGraph(now); return; }
+  const x0 = Math.floor(roi.x*PW), y0 = Math.floor(roi.y*PH);
+  const x1 = Math.min(PW, Math.ceil((roi.x+roi.w)*PW)), y1 = Math.min(PH, Math.ceil((roi.y+roi.h)*PH));
+  let sumD = 0, sumB = 0, n = 0;
+  for (let y=y0; y<y1; y++) for (let x=x0; x<x1; x++){ const k = y*PW+x; sumD += cur[k]-prev[k]; sumB += cur[k]; n++; }
+  if (!n) return;
+  const md = sumD/n, bright = sumB/n;   // md removes global brightness change (auto exposure)
+  let cnt = 0, sumA = 0;
+  for (let y=y0; y<y1; y++) for (let x=x0; x<x1; x++){ const k = y*PW+x; const v = Math.abs(cur[k]-prev[k]-md); sumA += v; if (v > T) cnt++; }
+  const m = cnt/n, meanAbs = sumA/n;
+  if (m < 0.005) noise = noise*0.97 + meanAbs*0.03;
+  T = Math.max(14, noise*3.5);
+  const tmp = prev; prev = cur; cur = tmp;
+
+  // darkness check
+  if (bright < 22){ if (!dark){ dark = true; darkSince = now; } }
+  else { dark = false; }
+  banner('dark', dark && now - darkSince > 5000 ? '🌑 <b>Quá tối</b> – camera không nhìn rõ bé. Hãy bật đèn ngủ mờ.' : null, 'warn');
+
+  // baseline & thresholds
+  const S = settings.sens;
+  const minAbs = 0.06 * Math.pow(0.78, S-1);         // fraction of ROI pixels changing
+  const older = []; for (const h of hist) if (h.t < now - 1500) older.push(h.m);
+  const base = percentile(older, 0.5);
+  const thr = Math.max(minAbs, base*3 + minAbs*0.3);
+  hist.push({ t:now, m, thr });
+  while (hist.length && hist[0].t < now - 30000) hist.shift();
+  $('pMotion').textContent = 'Cử động: ' + (m*100).toFixed(1) + '%';
+
+  if (now < warmUntil || now < suppressUntil || selecting){ ev = null; drawGraph(now); return; }
+  const maxDurMs = settings.maxDur*1000;
+  if (!ev){
+    if (m > thr) ev = { start:now, last:now, peak:m, thr, long:false };
+  } else {
+    if (m > ev.thr*0.5){ ev.last = now; if (m > ev.peak) ev.peak = m; }
+    const ended = (m <= ev.thr*0.5 && now - ev.last > 200);
+    if (!ev.long && now - ev.start > maxDurMs){
+      ev.long = true;
+      const rec = newRecord('long', ev, now);
+      if (settings.alarmLong) triggerAlarm('long', 'BÉ ĐANG CỬ ĐỘNG NHIỀU', 'Cử động kéo dài (có thể trở mình hoặc thức dậy).', rec);
+    }
+    if (ended){
+      const dur = ev.last - ev.start;
+      if (!ev.long && dur <= maxDurMs){
+        const usePose = pose && poseState === 'ready';
+        const arms = usePose ? armAnalysis(ev, now) : { known:false };
+        if (arms.known && arms.n === 0){
+          const rec = newRecord('fast', ev, now, 'Cử động nhanh, tay không chới với');
+          if (settings.alarmAllFast) triggerAlarm('fast', 'BÉ CỬ ĐỘNG NHANH', 'Lúc ' + fmtTime(rec.wall) + ' (tay không chới với). Hãy xem bé.', rec);
+        } else {
+          marks.push(now);
+          const label = !arms.known ? 'Giật mình (không thấy rõ tay)' : arms.n === 2 ? 'Giật mình – HAI TAY chới với' : 'Giật mình – một tay hất lên';
+          const rec = newRecord('startle', ev, now, label);
+          const c = countRecent();
+          triggerAlarm('startle', arms.known && arms.n === 2 ? 'BÉ GIẬT MÌNH, HAI TAY CHỚI VỚI' : 'BÉ CÓ CỬ ĐỘNG GIẬT MÌNH',
+            label + ' • lúc ' + fmtTime(rec.wall) + ' • ' + c + ' lần trong 30 phút qua. Hãy xem bé ngay.', rec);
+        }
+      }
+      ev = null;
+    }
+  }
+  drawGraph(now);
+}
+
+function newRecord(type, e, now, label){
+  const pre = ring.filter(f => f.t >= e.start - 3000);
+  const rec = { id:Date.now()+Math.random(), type, wall:Date.now() - (now - e.start), dur:(Math.max(e.last, now) - e.start)/1000, peak:e.peak,
+                frames:pre.slice(), until:now + 2000, done:false, label };
+  events.unshift(rec); if (events.length > 40) events.pop();
+  pending.push(rec);
+  updateCount(); renderLog();
+  return rec;
+}
+function countRecent(){ const lim = Date.now() - 30*60*1000; return events.filter(r => r.type==='startle' && r.wall >= lim).length; }
+function updateCount(){ const c = countRecent(); const el = $('pCount'); el.textContent = 'Giật mình 30 phút qua: ' + c; el.className = 'pill' + (c ? ' bad' : ''); }
+
+// ---------- Graph ----------
+function sizeGraph(){ const dpr = window.devicePixelRatio||1; graph.width = Math.round(graph.clientWidth*dpr); graph.height = Math.round(80*dpr); }
+sizeGraph();
+function drawGraph(now){
+  const w = graph.width, h = graph.height;
+  gctx.clearRect(0,0,w,h);
+  if (!hist.length) return;
+  let mx = 0.02; for (const p of hist){ mx = Math.max(mx, p.m, p.thr); } mx *= 1.15;
+  const X = t => w - (now - t)/30000*w, Y = v => h - v/mx*h;
+  gctx.strokeStyle = 'rgba(255,77,79,.9)'; gctx.lineWidth = 2; gctx.setLineDash([6,4]); gctx.beginPath();
+  hist.forEach((p,i) => i ? gctx.lineTo(X(p.t),Y(p.thr)) : gctx.moveTo(X(p.t),Y(p.thr))); gctx.stroke(); gctx.setLineDash([]);
+  gctx.strokeStyle = '#4da3ff'; gctx.lineWidth = 2; gctx.beginPath();
+  hist.forEach((p,i) => i ? gctx.lineTo(X(p.t),Y(p.m)) : gctx.moveTo(X(p.t),Y(p.m))); gctx.stroke();
+  gctx.fillStyle = 'rgba(255,77,79,.6)';
+  marks = marks.filter(t => now - t < 30000);
+  for (const t of marks) gctx.fillRect(X(t)-2, 0, 4, h);
+}
+
+// ---------- Alarm ----------
+let alarmAnim = null;
+function triggerAlarm(kind, title, sub, rec){
+  try { navigator.vibrate && navigator.vibrate([600,300,600,300,600]); } catch(e) {}
+  $('dim').classList.add('hidden');
+  if (alarmActive){ $('alarmSub').textContent = sub; if (rec){ alarmRec = rec; } return; }
+  alarmActive = true; alarmRec = rec || null;
+  $('alarmTitle').textContent = title; $('alarmSub').textContent = sub;
+  $('alarm').classList.remove('hidden');
+  drawOverlay(true);
+  sirenOn();
+  const c = $('alarmCanvas');
+  c.classList.toggle('hidden', !rec);
+  if (alarmAnim) alarmAnim.stop();
+  if (rec) alarmAnim = playFrames(rec, c);
+}
+$('btnAck').onclick = () => {
+  sirenOff(); alarmActive = false; $('alarm').classList.add('hidden');
+  if (alarmAnim){ alarmAnim.stop(); alarmAnim = null; }
+  try { navigator.vibrate && navigator.vibrate(0); } catch(e) {}
+  suppressUntil = performance.now() + 2500; drawOverlay();
+};
+$('btnTest').onclick = () => {
+  unlockAudio();
+  setTimeout(() => triggerAlarm('test', 'THỬ CHUÔNG', 'Nếu bạn nghe rõ chuông này thì đã ổn. Bấm nút để tắt.'), 150);
+};
+
+// ---------- Replay ----------
+const imgCache = new Map();
+function getImg(url){ let im = imgCache.get(url); if (!im){ im = new Image(); im.src = url; imgCache.set(url, im); if (imgCache.size > 1500) imgCache.delete(imgCache.keys().next().value); } return im; }
+function drawFrame(ctx, c, f, rec){
+  const im = getImg(f.url);
+  if (!(im.complete && im.naturalWidth)) return;
+  if (c.width !== im.naturalWidth){ c.width = im.naturalWidth; c.height = im.naturalHeight; }
+  ctx.drawImage(im, 0, 0);
+  ctx.fillStyle = 'rgba(0,0,0,.55)'; ctx.fillRect(0, 0, c.width, 22);
+  ctx.fillStyle = '#fff'; ctx.font = '14px system-ui,sans-serif';
+  ctx.fillText(fmtTime(f.wall), 6, 16);
+  if (Math.abs(f.wall - rec.wall) < 1200 + rec.dur*1000 && f.wall >= rec.wall - 200){ ctx.fillStyle = '#ff4d4f'; ctx.beginPath(); ctx.arc(c.width-14, 11, 6, 0, 7); ctx.fill(); }
+}
+function playFrames(rec, c){
+  const ctx = c.getContext('2d'); let i = 0, stopped = false;
+  const step = () => { if (stopped) return; const fr = rec.frames; if (fr.length){ drawFrame(ctx, c, fr[i % fr.length], rec); i++; if (i >= fr.length + 4) i = 0; } setTimeout(step, 133); };
+  step();
+  return { stop(){ stopped = true; } };
+}
+let viewerAnim = null, viewerRec = null;
+function openViewer(rec){
+  viewerRec = rec; $('saveMsg').textContent = '';
+  $('viewerTitle').textContent = (rec.label || (rec.type==='long' ? 'Cử động kéo dài' : 'Giật mình')) + ' lúc ' + fmtTime(rec.wall);
+  $('viewer').classList.remove('hidden');
+  if (viewerAnim) viewerAnim.stop();
+  viewerAnim = playFrames(rec, $('viewerCanvas'));
+}
+$('btnCloseViewer').onclick = () => { $('viewer').classList.add('hidden'); if (viewerAnim){ viewerAnim.stop(); viewerAnim = null; } };
+$('btnSave').onclick = async () => {
+  if (!viewerRec) return;
+  const msg = $('saveMsg');
+  try {
+    if (!window.MediaRecorder || !HTMLCanvasElement.prototype.captureStream) throw new Error('Trình duyệt không hỗ trợ xuất video. Hãy quay màn hình đoạn phát lại này.');
+    msg.textContent = 'Đang tạo video…';
+    const rec = viewerRec, c = document.createElement('canvas'); c.width = SW; c.height = SH;
+    const ctx = c.getContext('2d');
+    await Promise.all(rec.frames.map(f => { const im = getImg(f.url); return im.decode ? im.decode().catch(()=>{}) : Promise.resolve(); }));
+    drawFrame(ctx, c, rec.frames[0], rec);
+    const types = ['video/mp4', 'video/webm;codecs=vp9', 'video/webm;codecs=vp8', 'video/webm'];
+    const mime = types.find(t => MediaRecorder.isTypeSupported && MediaRecorder.isTypeSupported(t)) || '';
+    const st = c.captureStream(8), mr = new MediaRecorder(st, mime ? {mimeType:mime} : undefined), chunks = [];
+    mr.ondataavailable = e => { if (e.data && e.data.size) chunks.push(e.data); };
+    const done = new Promise(r => mr.onstop = r);
+    mr.start();
+    for (const f of rec.frames){ drawFrame(ctx, c, f, rec); await new Promise(r => setTimeout(r, 133)); }
+    mr.stop(); await done;
+    const type = mr.mimeType || mime || 'video/webm';
+    const blob = new Blob(chunks, {type});
+    const ext = type.includes('mp4') ? 'mp4' : 'webm';
+    const d = new Date(rec.wall), pad = x => String(x).padStart(2,'0');
+    const name = `be-giat-minh-${d.getFullYear()}${pad(d.getMonth()+1)}${pad(d.getDate())}-${pad(d.getHours())}${pad(d.getMinutes())}${pad(d.getSeconds())}.${ext}`;
+    const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = name; document.body.appendChild(a); a.click(); a.remove();
+    msg.textContent = 'Đã lưu ' + name + ' (xem trong mục Tải về).';
+  } catch(e){ msg.textContent = 'Không lưu được: ' + e.message; }
+};
+
+// ---------- Log ----------
+function renderLog(){
+  const el = $('log');
+  if (!events.length){ el.innerHTML = '<div class="muted">Chưa có sự kiện.</div>'; return; }
+  el.innerHTML = '';
+  for (const rec of events){
+    const it = document.createElement('div'); it.className = 'item';
+    const img = document.createElement('img');
+    const mid = rec.frames[Math.min(rec.frames.length-1, Math.floor(rec.frames.length/2))];
+    if (mid) img.src = mid.url; else img.style.visibility = 'hidden';
+    const meta = document.createElement('div'); meta.className = 'meta';
+    const label = rec.type === 'startle' ? '<span class="tag-startle">⚡ ' + (rec.label || 'Giật mình') + '</span>'
+      : rec.type === 'fast' ? '<span class="tag-long">· ' + rec.label + '</span>'
+      : rec.type === 'long' ? '<span class="tag-long">〰 Cử động kéo dài</span>' : '<span class="tag-sys">ℹ️ Hệ thống</span>';
+    meta.innerHTML = '<b>' + fmtTime(rec.wall) + '</b> ' + label + '<br>' + (rec.note ? rec.note : 'Kéo dài ~' + rec.dur.toFixed(1) + ' s • mức ' + (rec.peak*100).toFixed(0) + '%');
+    it.appendChild(img); it.appendChild(meta);
+    if (rec.frames.length){ const b = document.createElement('button'); b.textContent = rec.done ? '▶ Xem lại' : '…'; b.disabled = !rec.done; b.onclick = () => openViewer(rec); it.appendChild(b); }
+    el.appendChild(it);
+  }
+}
+$('btnClear').onclick = () => { events = []; marks = []; renderLog(); updateCount(); };
+function sysLog(note){ events.unshift({ id:Date.now(), type:'sys', wall:Date.now(), dur:0, peak:0, frames:[], done:true, note }); renderLog(); }
+
+// ---------- Wake lock / visibility / battery ----------
+async function requestWake(){
+  try { if ('wakeLock' in navigator){ wakeLock = await navigator.wakeLock.request('screen'); wakeLock.addEventListener('release', () => { wakeLock = null; updateState(); }); } } catch(e){ wakeLock = null; }
+  updateState();
+}
+document.addEventListener('visibilitychange', async () => {
+  if (!running) return;
+  if (document.hidden){ hiddenAt = Date.now(); }
+  else {
+    if (hiddenAt){ const mins = ((Date.now()-hiddenAt)/60000).toFixed(1);
+      banner('gap', '⚠️ Theo dõi đã <b>bị gián đoạn</b> ' + mins + ' phút (từ ' + fmtTime(hiddenAt) + ') do rời khỏi trang / tắt màn hình.', 'bad');
+      sysLog('Gián đoạn ' + mins + ' phút từ ' + fmtTime(hiddenAt)); hiddenAt = null; }
+    try { await video.play(); } catch(e) {}
+    requestWake(); resetDetector();
+  }
+});
+let battery = null;
+if (navigator.getBattery) navigator.getBattery().then(b => { battery = b; }).catch(()=>{});
+let lowBatAlarmed = false;
+function checkBattery(){
+  if (!battery) return;
+  if (!battery.charging && battery.level < 0.3) banner('bat', '🔋 Pin còn ' + Math.round(battery.level*100) + '% và chưa cắm sạc.', 'warn'); else banner('bat', null);
+  if (running && !battery.charging && battery.level <= 0.1 && !lowBatAlarmed){ lowBatAlarmed = true; triggerAlarm('sys', 'PIN SẮP HẾT', 'Điện thoại sắp tắt – hãy cắm sạc, nếu không sẽ ngừng theo dõi.'); }
+  if (battery.charging) lowBatAlarmed = false;
+}
+
+function updateState(){
+  const p = $('pState');
+  if (!running){ p.textContent = 'Chưa chạy'; p.className = 'pill'; return; }
+  const since = startedWall ? ' từ ' + new Date(startedWall).toLocaleTimeString('vi-VN', {hour:'2-digit', minute:'2-digit'}) : '';
+  p.textContent = '● Đang theo dõi' + since + (wakeLock ? '' : ' (tự khóa màn hình có thể bật!)');
+  p.className = 'pill ' + (wakeLock ? 'ok' : 'warn');
+}
+
+// ---------- Start / stop ----------
+$('btnStart').onclick = async () => {
+  unlockAudio();
+  $('btnStart').disabled = true;
+  try {
+    await startCamera();
+    running = true; startedWall = Date.now(); resetDetector(); lastFrame = performance.now();
+    clearInterval(timer); timer = setInterval(tick, 66);
+    clearInterval(watchdog);
+    watchdog = setInterval(() => {
+      if (!running || document.hidden) return;
+      if (performance.now() - lastFrame > 4000) triggerAlarm('sys', 'CAMERA NGỪNG HOẠT ĐỘNG', 'Không nhận được hình từ camera. Theo dõi đang dừng!');
+      checkBattery(); updateCount(); updateState(); updateBaby();
+    }, 1000);
+    await requestWake();
+    loadPose();
+    ['btnStop','btnRoi','btnRoiReset','btnDim'].forEach(id => $(id).disabled = false);
+    banner('err', null); sysLog('Bắt đầu theo dõi');
+  } catch(e){
+    $('btnStart').disabled = false;
+    banner('err', '❌ Không mở được camera: ' + (e.message || e.name) + '<br>Hãy cho phép quyền camera cho trang này rồi thử lại.', 'bad');
+  }
+};
+$('btnStop').onclick = () => {
+  running = false; clearInterval(timer); clearInterval(watchdog);
+  if (stream) stream.getTracks().forEach(t => t.stop()); stream = null;
+  if (wakeLock) { try { wakeLock.release(); } catch(e) {} }
+  ['btnStop','btnRoi','btnRoiReset','btnDim'].forEach(id => $(id).disabled = true);
+  $('btnStart').disabled = false; $('stageMsg').classList.remove('hidden');
+  sysLog('Dừng theo dõi'); updateState();
+};
+$('btnCam').onclick = async () => {
+  settings.facing = settings.facing === 'environment' ? 'user' : 'environment'; saveSettings();
+  if (running){ try { await startCamera(); resetDetector(); } catch(e){ banner('err', '❌ ' + e.message, 'bad'); } }
+};
+$('btnDim').onclick = () => $('dim').classList.remove('hidden');
+$('dim').onclick = () => $('dim').classList.add('hidden');
+window.addEventListener('beforeunload', e => { if (running){ e.preventDefault(); e.returnValue = ''; } });
+
+// test hook (harmless in normal use)
+window.__canhbe = { setPose(p){ pose = p; poseState = p ? 'ready' : 'failed'; }, get babyBox(){ return babyBox; }, get events(){ return events; }, get hist(){ return hist; }, ack(){ $('btnAck').click(); }, get alarmActive(){ return alarmActive; } };
+updateState();
+})();
+</script>
+</body>
+</html>
